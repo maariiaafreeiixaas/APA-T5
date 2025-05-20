@@ -1,6 +1,6 @@
 # Sonido estéreo y ficheros WAVE
 
-## Nom i cognoms
+## Nom i cognoms: Maria Freixas Solé
 
 ## El formato WAVE
 
@@ -189,12 +189,121 @@ para que se realice el realce sintáctico en Python del mismo (no vale insertar 
 pantalla, debe hacerse en formato *markdown*).
 
 ##### Código de `estereo2mono()`
+```python
+def estereo2mono(fic_estereo, fic_salida, canal=2):
+    '''
+    Convierte un archivo estéreo a mono.
+    canal = 0: izquierdo, 1: derecho, 2: semisuma, 3: semidiferencia
+    '''
+    with open(fic_estereo, 'rb') as f_est:
+        info = leer_cabecera(f_est)
+        if info['canales'] != 2:
+            raise TypeError("El archivo no es estéreo")
+        f_est.seek(info['despl_datos'])
+        datos = f_est.read(info['tam_datos'])
+
+    muestras = struct.unpack('<' + 'h' * (info['tam_datos'] // 2), datos)
+    pares = zip(muestras[::2], muestras[1::2])
+
+    if canal == 0:
+        mono = [izq for izq, _ in pares]
+    elif canal == 1:
+        mono = [der for _, der in pares]
+    elif canal == 2:
+        mono = [(izq + der) // 2 for izq, der in pares]
+    elif canal == 3:
+        mono = [(izq - der) // 2 for izq, der in pares]
+    else:
+        raise TypeError('Canal no válido')
+
+    datos_mono = struct.pack('<' + 'h' * len(mono), *mono)
+
+    with open(fic_salida, 'wb') as f_out:
+        f_out.write(crear_cabecera(1, info['frec_muestreo'], 16, len(datos_mono)))
+        f_out.write(datos_mono)
+```
 
 ##### Código de `mono2estereo()`
+```python
+def mono2estereo(fic_izq, fic_der, fic_salida):
+    '''
+    Une dos archivos mono (izquierdo y derecho) en un archivo estéreo.
+    '''
+    with open(fic_izq, 'rb') as f_izq:
+        info_izq = leer_cabecera(f_izq)
+        if info_izq['canales'] != 1:
+            raise TypeError("El canal izquierdo no es mono")
+        f_izq.seek(info_izq['despl_datos'])
+        datos_izq = struct.unpack('<' + 'h' * (info_izq['tam_datos'] // 2), f_izq.read(info_izq['tam_datos']))
+
+    with open(fic_der, 'rb') as f_der:
+        info_der = leer_cabecera(f_der)
+        if info_der['canales'] != 1:
+            raise TypeError("El canal derecho no es mono")
+        f_der.seek(info_der['despl_datos'])
+        datos_der = struct.unpack('<' + 'h' * (info_der['tam_datos'] // 2), f_der.read(info_der['tam_datos']))
+
+    datos_est = struct.pack('<' + 'h' * (2 * len(datos_izq)), *sum(zip(datos_izq, datos_der), ()))
+
+    with open(fic_salida, 'wb') as f_out:
+        f_out.write(crear_cabecera(2, info_izq['frec_muestreo'], 16, len(datos_est)))
+        f_out.write(datos_est)
+```
 
 ##### Código de `codEstereo()`
+```python
+def codEstereo(fic_entrada, fic_codificado):
+    '''
+    Codifica una señal estéreo (16 bits por canal) en una sola señal de 32 bits.
+    '''
+    with open(fic_entrada, 'rb') as f:
+        info = leer_cabecera(f)
+        if info['canales'] != 2:
+            raise TypeError("El archivo no es estéreo")
+        f.seek(info['despl_datos'])
+        datos = struct.unpack('<' + 'h' * (info['tam_datos'] // 2), f.read(info['tam_datos']))
+
+    pares = zip(datos[::2], datos[1::2])
+    codificados = [((l + r) << 16 & 0xFFFF0000) | ((l - r) & 0xFFFF) for l, r in pares]
+
+    datos_cod = struct.pack('<' + 'I' * len(codificados), *codificados)
+
+    with open(fic_codificado, 'wb') as f_out:
+        f_out.write(crear_cabecera(1, info['frec_muestreo'], 32, len(datos_cod)))
+        f_out.write(datos_cod)
+```
 
 ##### Código de `decEstereo()`
+```python
+def decEstereo(fic_codificado, fic_salida):
+    '''
+    Decodifica una señal monofónica de 32 bits en una señal estéreo original.
+    '''
+    with open(fic_codificado, 'rb') as f:
+        info = leer_cabecera(f)
+        if info['bits_muestra'] != 32:
+            raise TypeError('La señal no está codificada en 32 bits')
+        f.seek(info['despl_datos'])
+        datos = struct.unpack('<' + 'I' * (info['tam_datos'] // 4), f.read(info['tam_datos']))
+
+    reconstruido = []
+
+    for cod in datos:
+        suma = (cod >> 16) & 0xFFFF
+        dif = cod & 0xFFFF
+        suma = struct.unpack('<h', struct.pack('<H', suma))[0]
+        dif = struct.unpack('<h', struct.pack('<H', dif))[0]
+        izq = (suma + dif) // 2
+        der = (suma - dif) // 2
+        reconstruido.append(izq)
+        reconstruido.append(der)
+
+    datos_est = struct.pack('<' + 'h' * len(reconstruido), *reconstruido)
+
+    with open(fic_salida, 'wb') as f_out:
+        f_out.write(crear_cabecera(2, info['frec_muestreo'], 16, len(datos_est)))
+        f_out.write(datos_est)
+```
 
 #### Subida del resultado al repositorio GitHub y *pull-request*
 
